@@ -21,9 +21,18 @@ def get_asset_nodes_helper(file: str) -> Generator[str, None, None]:
 
 
 def get_asset_nodes() -> Generator[str, None, None]:
+    """Retrieve the name of all factory asset node groups.
+    """
     for file in nodes_dir.rglob('*blend'):
         yield from get_asset_nodes_helper(file)
 
+
+def get_asset_name_dict() -> Generator[tuple[str, str], None, None]:
+    """Retrieve the name and file path of all factory asset node groups.
+    """
+    for file in nodes_dir.rglob('*blend'):
+        for name in get_asset_nodes_helper(file):
+            yield name, file
 
 
 def get_asset_file(name: str) -> str | None:

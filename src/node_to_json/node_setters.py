@@ -2,26 +2,14 @@ import bpy
 from .asset_funcs import get_asset_nodes, asset_node_group
 from .setter_funcs import set_node_from_data
 from .type_util import BNode, BGroup, PYDict
-from .func_util import convert_default_value
+from .func_util import convert_default_value, match_keys_basenames
 from .node_registry import register_ng_setter
-from typing import Generator
+from .node_getters import get_node_group_names
+from typing import Generator, Iterator
 from itertools import tee, repeat
+# from warnings import deprecated
 
-
-socket_attr = [
-                'description', 
-                'enabled', 
-                'hide', 
-                'hide_value', 
-                'name', 
-                'pin_gizmo', 
-                'show_expanded', 
-                'type', 
-                'is_linked', 
-                'default_value', 
-                ]
-
-tree_exclude = [
+tree_exclude = {
                 'name', 
                 'description', 
                 'in_out', 
@@ -34,7 +22,7 @@ tree_exclude = [
                 'is_multi_input',
                 'item_type', 
                 'persistent_uid', 
-                ]
+                }
 
 
 ########################## NODE ###########################
@@ -47,7 +35,7 @@ def set_socket_attr(node: BNode, attr: PYDict, set_enum: bool=False) -> None:
                 setattr(sock, 'default_value', convert_default_value(sock, a['default_value']))
             except Exception as e:
                 continue
-    condition = lambda i: i[1]['type'] not in ['CUSTOM'] and (True if set_enum else i[0].type not in ['MENU']) and not i[1]['is_linked'] and 'default_value' in i[1].keys()
+    condition = lambda i: i[1]['type'] != 'CUSTOM' and (True if set_enum else i[0].type != 'MENU') and not i[1]['is_linked'] and 'default_value' in i[1].keys()
     inputs = getattr(node, 'inputs', None)
     if inputs:
         ifil = filter(condition, zip(inputs[:], attr['inputs']))
@@ -57,7 +45,7 @@ def set_socket_attr(node: BNode, attr: PYDict, set_enum: bool=False) -> None:
 def set_parent(node: BNode, attr: PYDict) -> None:
     if hasattr(node, 'parent'):
         if 'parent' in attr.keys():
-            if attr['parent'] not in [None, '']:
+            if attr['parent'] not in {None, ''}:
                 try:
                     setattr(node, 'parent', node.id_data.nodes[attr['parent']])
                 except Exception as e:
@@ -79,7 +67,7 @@ def set_hide(node: BNode, attr: PYDict) -> None:
                 pass
 
 
-def process_node(node: BNode, data: PYDict, group_dict: dict[str, BGroup] | dict[None], parent: bool=True, set_enum: bool=False) -> None:
+def process_node(node: BNode, data: PYDict, group_dict: dict[str, BGroup] | dict[None] | None=None, parent: bool=True, set_enum: bool=False, hide: bool=True, set_attr: bool=True) -> None:
     """Set node attributes from data.
     
     :param node: Node to set the data to.
@@ -91,12 +79,19 @@ def process_node(node: BNode, data: PYDict, group_dict: dict[str, BGroup] | dict
     :param parent: Set parent node if available.
     :type parent: bool
     :param set_enum: Dict containing the node group enum sockets.
-    :type set_enum: bool"""
+    :type set_enum: bool
+    :param hide: Hide node if available.
+    :type hide: bool
+    :param set_attr: Choose whether to set node common attributes.
+    :type set_attr: bool"""
     try:
-        set_node_from_data(node, data, group_dict)
+        if not group_dict:
+            group_dict = {}
+        set_node_from_data(node, data, group_dict, set_attr=set_attr)
         set_socket_attr(node, data, set_enum=set_enum)
-        if node.bl_idname not in ['NodeReroute']:
-            set_hide(node, data)
+        if node.bl_idname not in {'NodeReroute'}:
+            if hide:
+                set_hide(node, data)
         if parent:
             set_parent(node, data)
     except Exception as e:
@@ -135,38 +130,6 @@ def node_map(data: PYDict, groups: dict[str, BNode]) -> Generator[tuple[str, dic
 def node_group_map(data: PYDict, group_type: str='GeometryNodeTree') -> tuple[str, Generator[tuple[str, dict[str, BNode]], None, None]]:
     groups, _groups = tee(create_node_groups_from_data(data, group_type=group_type), 2)
     return groups, node_map(data, _groups)
-
-
-def set_interface(data: PYDict, node_tree: BGroup) -> None:
-        """Set sockets of node group from data.
-        
-        :param data: Data to set the sockets.
-        :type data: dict[str, Any]
-        :param node_tree: Node group to set data to.
-        :type node_tree: Node Group"""
-        global tree_exclude
-        if 'interface' in data.keys() and data['interface'] != None and hasattr(node_tree, 'interface'):
-            for item in data['interface']:
-                for attr in item.keys():
-                    if attr not in tree_exclude:
-                        it = node_tree.interface.items_tree[data['interface']['index']]
-                        if hasattr(it, attr) and item[attr] not in [None, '', []]:
-                            try:
-                                setattr(it, attr, item[attr])
-                            except Exception:
-                                try:
-                                    gi = getattr(it, attr, None)
-                                    if isinstance(gi, bpy.types.bpy_prop_array):
-                                        ct = len(gi)
-                                        _ct = len(item[attr])
-                                        count = ct if _ct > ct else _ct
-                                        val = list(repeat(0.0, ct))
-                                        for i in range(count):
-                                            val[i] = item[attr][i]
-                                        setattr(it, attr, val)
-                                except Exception:
-                                    continue
-        return
 
 
 def set_node_groups_from_data(data: PYDict, group_type: str='GeometryNodeTree') -> tuple[dict[str, BGroup], PYDict, PYDict, dict[str, BNode]]:
@@ -274,6 +237,7 @@ def set_node_groups_interface_parents(data: PYDict, group_dict: dict[str, BGroup
                         continue
 
 
+
 @register_ng_setter('GeometryNodeTree')
 def create_node_group_from_data(data: PYDict, group_type: str='GeometryNodeTree') -> BGroup:
     """Create a node group from build data.
@@ -338,7 +302,7 @@ def create_shader_group_from_data(data: PYDict, group_type: str='ShaderNodeTree'
 
 def set_shader_from_data(data_dict: PYDict, node_dict: dict[str, BNode], group_dict: dict[str, BGroup]) -> None:
     for _node, node in node_dict.items():
-        process_node(node, data_dict[_node], group_dict, set_enum=True)
+        process_node(node, data_dict[_node], group_dict, set_enum=True, set_attr=True)
 
 
 def create_material(data: PYDict) -> bpy.types.Material:
@@ -352,7 +316,7 @@ def create_material(data: PYDict) -> bpy.types.Material:
     mat_name = list(data.keys())[0]
     material = bpy.data.materials.new(mat_name)
     for a in data[mat_name]:
-        if a not in ['node_tree'] and hasattr(material, a):
+        if a not in {'node_tree'} and hasattr(material, a):
             setattr(material, a, data[mat_name][a])
     node_tree = getattr(material, 'node_tree', None)
     if node_tree:
@@ -431,3 +395,163 @@ def create_texture_group_from_data(data: PYDict) -> BGroup:
     :rtype: NodeGroup"""
     node_group = create_node_group_from_data(data, group_type='TextureNodeTree')
     return node_group
+
+
+####################### PRESETS ########################
+
+
+def get_name_dict(node_tree: BGroup, data: PYDict) -> Iterator[str] | None:
+    """Create an iterator of paired data node group names with the coresponding node_tree node group name.
+    
+    :param node_tree: The node tree to gather names to match with.
+    :type node_tree: NodeGroup
+    :param data: Data dict to get names from.
+    :type data: dict[str, Any]
+    :return: Paired iterator of names.
+    :rtype: Iterator[str] | None"""
+    return match_keys_basenames(get_node_group_names(node_tree), data)
+
+
+def get_group_dict(node_tree: BGroup, data: PYDict) -> dict[str, BGroup] | None:
+    """Create an dict of paired data node group names with the coresponding node_tree node group.
+    
+    :param node_tree: The node tree to gather names to match with.
+    :type node_tree: NodeGroup
+    :param data: Data dict to get names from.
+    :type data: dict[str, Any]
+    :return: Paired dict of data keys and node_tree node groups.
+    :rtype: dict[str, BGroup] | None"""
+    name_dict = get_name_dict(node_tree, data)
+    if name_dict:
+        return {k: bpy.data.node_groups[v] for k, v in name_dict}
+    return
+
+
+def set_special_node_presets(node_tree: BGroup, data: PYDict) -> None:
+    """Set the presets of a node group.
+    
+    :param node_tree: Node group to set data on.
+    :type node_tree: NodeGroup
+    :param data: Data used to set presets.
+    :type data: dict[str, Any]"""
+    group_dict = get_group_dict(node_tree, data)
+    if not group_dict:
+        return
+    for group, group_ in group_dict.items():
+        d = data[group]
+        n = d['nodes']
+        if n:
+            nodes = group_.nodes
+            for node, nd in n.items():
+                process_node(nodes[node], nd, group_dict, parent=False, hide=False, set_attr=False)
+
+
+def set_geometry_node_input_presets(modifier: bpy.types.Modifier, data: PYDict) -> None:
+    """Set preset data for a Geometry Node modifier inputs.
+    
+    :param modifier: Geometry Node modifier to set data to.
+    :type modifier: Modifier
+    :param data: Data dict with data to set Geometry Node modifier inputs.
+    :type data: dict[str, Any]"""
+    inputs = modifier.properties.inputs
+    for sock, item in data:
+        try:
+            sock_ = getattr(inputs, sock, None)
+            if sock_:
+                sock_['value'] = item['value']
+        except:
+            continue
+    modifier.node_group.interface_update(bpy.context)
+
+
+def set_geometry_node_presets(modifier: bpy.types.Modifier, data: PYDict) -> None:
+    """Set preset data for a Geometry Node modifier.
+    
+    :param modifier: Geometry Node modifier to set data to.
+    :type modifier: Modifier
+    :param data: Data dict with data to set Geometry Node modifier inputs and special nodes.
+    :type data: dict[str, Any]"""
+    data_ = list(data.values())[0]
+    set_geometry_node_input_presets(modifier, data_['interface'])
+    node_group = getattr(modifier, 'node_group', None)
+    if node_group:
+        set_special_node_presets(node_group, data_['nodes'])
+
+
+def set_node_group_interface_presets(node_group: BGroup, data: PYDict) -> None:
+    """Set preset data for a node group inputs.
+    
+    :param modifier: Node group to set data to.
+    :type modifier: NodeGroup
+    :param data: Data dict with data to set node group inputs.
+    :type data: dict[str, Any]"""
+    input_dict = {i.identifier: i for i in node_group.inputs}
+    for sock, val, identifier in data:
+        try:
+            sock_ = input_dict[identifier]
+            if sock_:
+                sock_.default_value = val
+        except:
+            continue
+    node_group.interface_update(bpy.context)
+
+
+# def set_node_group_input_presets(node_group: BGroup, data: PYDict) -> None:
+#     """Set preset data for a node group node inputs.
+    
+#     :param node_group: Node group to set data to.
+#     :type node_group: NodeGroup
+#     :param data: Data dict with data to set node group node inputs.
+#     :type data: dict[str, dict[str, list[int, Any]]]"""
+#     groups = bpy.data.node_groups
+#     name_dict = dict(get_name_dict(node_group, data))
+#     if name_dict:
+#         for k, v in data.items():
+#             group = groups.get(name_dict[k])
+#             if group:
+#                 for node, dat in v.items():
+#                     n = group.nodes.get(node)
+#                     if n:
+#                         for index, value in dat:
+#                             try:
+#                                 n.inputs[index].default_value = value
+#                             except Exception as e:
+#                                 continue
+
+
+def set_node_group_input_presets(node_group: BGroup, data: PYDict) -> None:
+    """Set preset data for a node group node inputs.
+    
+    :param node_group: Node group to set data to.
+    :type node_group: NodeGroup
+    :param data: Data dict with data to set node group node inputs.
+    :type data: dict[str, dict[str, list[Any]]]"""
+    groups = bpy.data.node_groups
+    name_dict = dict(get_name_dict(node_group, data))
+    if name_dict:
+        for k, v in data.items():
+            group = groups.get(name_dict[k])
+            if not group:
+                if name_dict[k] == node_group.name:
+                    group = node_group
+            if group:
+                for node, dat in v.items():
+                    n = group.nodes.get(node)
+                    if n:
+                        for index, name, identifier, value in dat:
+                            try:
+                                n.inputs[index].default_value = value
+                            except Exception as e:
+                                continue
+
+
+def set_node_group_presets(node_group: BGroup, data: PYDict) -> None:
+    """Set preset data for a node group.
+    
+    :param modifier: Node group to set data to.
+    :type modifier: NodeGroup
+    :param data: Data dict with data to set node group inputs and special nodes.
+    :type data: dict[str, Any]"""
+    data_ = list(data.values())[0]
+    set_node_group_input_presets(node_group, data_['interface'])
+    set_special_node_presets(node_group, data_['nodes'])

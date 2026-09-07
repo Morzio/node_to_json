@@ -1,6 +1,6 @@
 [project]
 name = "node_to_json"
-version = "0.1.1"
+version = "0.2.0"
 description = "Blender 5.2 Serialize Node Groups to JSON files.Load Node Groups from JSON files."
 readme = "README.md"
 authors = [
