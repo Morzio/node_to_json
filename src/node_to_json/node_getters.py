@@ -1,15 +1,17 @@
 import bpy
 from typing import Any, Generator
-from .type_util import BNode, BGroup, PYDict
+from operator import itemgetter
+from itertools import groupby
+from .type_util import BNode, BGroup, PYDict, PYContainer, PYObject
 from .asset_funcs import get_asset_nodes
-from .func_util import convert_attr, nested_dict
+from .func_util import convert_attr, nested_dict, grouped_by_dict
 from .node_registry import register_ng_getter
 
 
-node_attr_exclude = ['rna_type', 'bl_rna', 'inputs', 'internal_links', 'outputs', 'enum_definition', 'interface_items', 'panel_states', 
-                     'item', 'bl_static_type', 'dimensions', 'color_tag']
+node_attr_exclude = {'rna_type', 'bl_rna', 'inputs', 'internal_links', 'outputs', 'enum_definition', 'interface_items', 'panel_states', 
+                     'item', 'bl_static_type', 'dimensions', 'color_tag'}
 
-node_type_exclude = [
+node_type_exclude = {
         'bpy_prop_collection', 
         'Object', 
         'Material', 
@@ -23,9 +25,9 @@ node_type_exclude = [
         'GeometryNodeTree', 
         'ShaderNodeTree', 
         'CompositorNodeTree', 
-        ]
+        }
 
-preset_attr_exclude = [
+preset_attr_exclude = {
         'bl_description', 
         'bl_height_default', 
         'bl_height_max', 
@@ -58,7 +60,7 @@ preset_attr_exclude = [
         'use_custom_color', 
         'warning_propagation', 
         'width', 
-        ]
+        }
 
 socket_attr = [
                 'description', 
@@ -73,12 +75,12 @@ socket_attr = [
                 'default_value', 
                 ]
 
-loop_outputs = [
+loop_outputs = {
                 'GeometryNodeRepeatOutput', 
                 'GeometryNodeForeachGeometryElementOutput', 
                 'GeometryNodeSimulationOutput', 
                 'NodeClosureOutput', 
-                ]
+                }
 
 
 ### TREE NODES ###
@@ -188,6 +190,35 @@ mat_attr = [
             ]
 
 
+special_nodes = {
+        'ShaderNodeValToRGB', 
+        'TextureNodeValToRGB', 
+        'ShaderNodeTexWave', 
+        'ShaderNodeTexVoronoi', 
+        'ShaderNodeTexSky', 
+        'ShaderNodeTexNoise', 
+        'ShaderNodeTexMagic', 
+        'ShaderNodeTexImage', 
+        'ShaderNodeTexGradient', 
+        'ShaderNodeTexGabor', 
+        'ShaderNodeTexEnvironment', 
+        'ShaderNodeTexChecker', 
+        'ShaderNodeTexBrick', 
+        'ShaderNodeVectorCurve', 
+        'ShaderNodeRGBCurve', 
+        'ShaderNodeFloatCurve', 
+        'TextureNodeCurveRGB', 
+        'CompositorNodeCurveRGB', 
+        'CompositorNodeHueCorrect', 
+        'TextureNodeCurveTime', 
+        'CompositorNodeTime', 
+        'GeometryNodeCurveHandleTypeSelection', 
+        'GeometryNodeCurveSetHandles', 
+        'CompositorNodeConvertToDisplay', 
+        'CompositorNodeOutputFile', 
+    }
+
+
 ########################## NODE ###########################
 
 
@@ -200,20 +231,20 @@ def get_node_attr(ob: BNode, attr: list[str]) -> PYDict:
 
 def get_node_data(node: BNode) -> PYDict:
     global node_attr_exclude
-    a_filter = lambda a: (not a.startswith("__") and not a in node_attr_exclude) and (not getattr(node, a, None) is None and not type(getattr(node, a, None)).__name__ in ['bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'])
+    a_filter = lambda a: (not a.startswith("__") and not a in node_attr_exclude) and (not getattr(node, a, None) is None and not type(getattr(node, a, None)).__name__ in {'bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'})
     attributes = filter(a_filter, dir(node))
     def _get_attr(attr):
         val = getattr(node, attr, None)
         val_ = convert_attr(val)
-        if type(val).__name__ not in node_type_exclude and attr not in ['parent']:
+        if type(val).__name__ not in node_type_exclude and attr not in {'parent'}:
             if type(val).__name__ in dir(bpy.types):
                 return [attr, get_node_data(val)]
             else:
                 return [attr, val_]
         else: 
-            if type(val).__name__ in ['Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree'] or attr in ['parent']:
+            if type(val).__name__ in {'Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree'} or attr in {'parent'}:
                 return [attr, val_]
-            elif type(val).__name__ in ['bpy_prop_collection']:
+            elif type(val).__name__ in {'bpy_prop_collection'}:
                 return [attr, [get_node_data(v) for v in val[:]]]
             else:
                 pass
@@ -267,7 +298,7 @@ def get_node_group_names(node_group: BGroup) -> PYDict:
     :return: Dict containing the node group and all internally nested node groups.
     :rtype: dict[str, dict[None]]"""
 
-    return {**{node_group.name: {}}, **{group: {} for group in _get_node_group_names(node_group.nodes)}}
+    return {**{node_group.name: nested_dict()}, **{group: nested_dict() for group in _get_node_group_names(node_group.nodes)}}
 
 
 def get_node_group_attr_list(node_tree: BGroup) -> PYDict:
@@ -308,7 +339,7 @@ def get_socket_data(node: BNode) -> PYDict:
         if val is None:
             data[attr] = None
         else: 
-            if not type(val).__name__ in ['bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty']:
+            if not type(val).__name__ in {'bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'}:
                 val_ = convert_attr(val)
                 data[attr] = val_
     return data
@@ -356,13 +387,12 @@ def serialize_node_group(node_group: BGroup) -> PYDict:
 
     asset_nodes = set(get_asset_nodes())
     data = get_node_group_names(node_group)
-    gnames = [g.name for g in bpy.data.node_groups]
     for group in data:
-        if group in gnames:
+        node_tree = bpy.data.node_groups.get(group)
+        if node_tree:
             is_asset = group.split(".")[0] in asset_nodes
-            node_tree = bpy.data.node_groups[group]
             data[group] = {**get_node_group_attr_list(node_tree), **{'interface': (None if is_asset else list(get_node_group_interface(node_tree)))}, **{'links': (None if is_asset else list(get_links(node_tree)))}, **{'nodes': (None if is_asset else get_node_tree_nodes_data(node_tree))}}
-    return {d: data[d] for d in data if len(data[d]) > 0}
+    return {k: v for k, v in data.items() if len(v) > 0}
 
 
 ######################## MATERIAL #########################
@@ -384,13 +414,12 @@ def serialize_mat_group(node_group: BGroup) -> PYDict:
 
     asset_nodes = set(get_asset_nodes())
     data = get_node_group_names(node_group)
-    gnames = [g.name for g in bpy.data.node_groups]
     for group in data:
-        if group in gnames:
+        node_tree = bpy.data.node_groups.get(group)
+        if node_tree:
             is_asset = group.split(".")[0] in asset_nodes
-            node_tree = bpy.data.node_groups[group]
             data[group] = {**get_node_group_attr_list(node_tree), **{'interface': (None if is_asset else list(get_node_group_interface(node_tree)))}, **{'links': (None if is_asset else list(get_links(node_tree)))}, **{'nodes': (None if is_asset else get_node_tree_nodes_data(node_tree))}}
-    return {d: data[d] for d in data if len(data[d]) > 0}
+    return {k: v for k, v in data.items() if len(v) > 0}
 
 
 def serialize_material(material: bpy.types.Material) -> PYDict:
@@ -409,20 +438,20 @@ def serialize_material(material: bpy.types.Material) -> PYDict:
 
 def get_comp_node_data(node: BNode) -> PYDict:
     global node_attr_exclude
-    a_filter = lambda a: (not a.startswith("__") and not a in node_attr_exclude) and (not getattr(node, a, None) is None and not type(getattr(node, a, None)).__name__ in ['bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'])
+    a_filter = lambda a: (not a.startswith("__") and not a in node_attr_exclude) and (not getattr(node, a, None) is None and not type(getattr(node, a, None)).__name__ in {'bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'})
     attributes = filter(a_filter, dir(node))
     def _get_attr(attr):
         val = getattr(node, attr, None)
         val_ = convert_attr(val)
-        if type(val).__name__ not in node_type_exclude and attr not in ['parent']:
+        if type(val).__name__ not in node_type_exclude and attr not in {'parent'}:
             if type(val).__name__ in dir(bpy.types):
                 return [attr, get_node_data(val)]
             else:
                 return [attr, val_]
         else: 
-            if type(val).__name__ in ['Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree'] or attr in ['parent']:
+            if type(val).__name__ in {'Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree'} or attr in {'parent'}:
                 return [attr, val_]
-            elif type(val).__name__ in ['bpy_prop_collection']:
+            elif type(val).__name__ in {'bpy_prop_collection'}:
                 return [attr, [get_node_data(v) for v in val[:]]]
             else:
                 return [attr, val_]
@@ -440,14 +469,13 @@ def serialize_comp_group(compositor: bpy.types.CompositorNodeTree) -> PYDict:
     
     asset_nodes = set(get_asset_nodes())
     data = get_node_group_names(compositor)
-    gnames = [g.name for g in bpy.data.node_groups]
     _nodes = lambda node_tree: {node.name: {**get_comp_node_data(node), **get_socket_attr(node)} for node in node_tree.nodes}
     for group in data:
-        if group in gnames:
+        node_tree = bpy.data.node_groups.get(group)
+        if node_tree:
             is_asset = group.split(".")[0] in asset_nodes
-            node_tree = bpy.data.node_groups[group]
             data[group] = {**get_node_group_attr_list(node_tree), **{'interface': (None if is_asset else list(get_node_group_interface(node_tree)))}, **{'links': (None if is_asset else list(get_links(node_tree)))}, **{'nodes': (None if is_asset else _nodes(node_tree))}}
-    return {d: data[d] for d in data if len(data[d]) > 0}
+    return {k: v for k, v in data.items() if len(v) > 0}
 
 
 def serialize_compositor(compositor: bpy.types.CompositorNodeTree) -> PYDict:
@@ -459,7 +487,7 @@ def serialize_compositor(compositor: bpy.types.CompositorNodeTree) -> PYDict:
     :rtype: dict[str, Any]"""
     
     compositor_exclude = ['bl_rna', 'id_type', 'interface', 'rna_type', 'nodes', 'links']
-    a_filter = lambda a: (not a.startswith("__") and not a in compositor_exclude) and (not getattr(compositor, a, None) is None and not type(getattr(compositor, a, None)).__name__ in ['bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'])
+    a_filter = lambda a: (not a.startswith("__") and not a in compositor_exclude) and (not getattr(compositor, a, None) is None and not type(getattr(compositor, a, None)).__name__ in {'bpy_func', 'method-wrapper', 'builtin_function_or_method', 'EnumProperty'})
     attributes = filter(a_filter, dir(compositor))
     def _get_attr(attr):
         val = getattr(compositor, attr, None)
@@ -469,3 +497,125 @@ def serialize_compositor(compositor: bpy.types.CompositorNodeTree) -> PYDict:
     data = dict(data) | {'node_groups': serialize_comp_group(compositor)}
     return data
 
+
+####################### PRESETS ########################
+
+
+def get_node_presets(node: bpy.types.Node, get_unlinked: bool=False) -> Generator[tuple[str, int, PYObject | PYContainer], None, None]:
+    """Retrieve input data for a node.
+    
+    :param node: Node to get input data from.
+    :type node: Node
+    :param get_unlinked: Choose whether to get linked input data.
+    :type get_unlinked: bool"""
+    for idx, input in enumerate(node.inputs):
+        if hasattr(input, 'default_value'):
+            if get_unlinked:
+                yield node.id_data.name, node.name, idx, input.name, input.identifier, convert_attr(input.default_value)
+            else:
+                if not input.is_linked:
+                    yield node.id_data.name, node.name, idx, input.name, input.identifier, convert_attr(input.default_value)
+
+
+def get_group_nodes_presets(nodes: bpy.types.bpy_prop_collection, get_unlinked: bool=False) -> Generator[tuple[str, int, PYObject | PYContainer], None, None]:
+    """Retrieve input data for all nodes.
+    
+    :param nodes: Collection of nodes to get input data from.
+    :type nodes: bpy_prop_collection
+    :param get_unlinked: Choose whether to get linked input data.
+    :type get_unlinked: bool"""
+    for node in nodes:
+        yield from get_node_presets(node, get_unlinked=get_unlinked)
+        if node.type == 'GROUP':
+            yield from get_group_nodes_presets(node.node_tree.nodes, get_unlinked=get_unlinked)
+
+
+def get_special_node_presets(node_group: BGroup) -> PYDict:
+    """Serialize data to rebuild a node group.
+    
+    :param node_group: Node group to get data from.
+    :type node_group: Node Group
+    :return: Dict of data to rebuild a node group.
+    :rtype: dict[str, Any]"""
+
+    global special_nodes
+    data = get_node_group_names(node_group)
+    for group in data:
+        node_tree = bpy.data.node_groups.get(group)
+        if node_tree:
+            data[group] = {'nodes': {node.name: get_node_build_data(node) for node in node_tree.nodes if node.bl_idname in special_nodes}}
+    return data
+
+
+def get_geometry_node_input_presets(modifier: bpy.types.Modifier) -> Generator[list[str, PYObject | PYContainer], None, None]: #Generator[PYContainer | PYObject, None, None]
+    """Retrieve a generator object of Geometry Node input sockets and values.
+    
+    :param modifier: Modifier to get data from.
+    :type modifier: """
+    inputs = modifier.properties.inputs
+    socks = (_ for _ in dir(inputs) if _.startswith("Socket"))
+    for s in socks:
+        data = getattr(inputs, s, None)
+        if data:
+            d = dict(data)
+            if 'value' in d.keys():
+                d['value'] = convert_attr(d['value'])
+                yield [s, d]
+
+
+def get_geometry_node_presets(modifier: bpy.types.Modifier) -> PYDict:
+    """Retrieve preset data for a Geometry Node modifier.
+    
+    :param modifier: Geometry Node modifier to get data from.
+    :type modifier: Modifier
+    :return: Data dict with data for setting modifier input settings and special node settings.
+    :rtype: dict[str, Any]"""
+    node_group = getattr(modifier, 'node_group', None)
+    if node_group:
+        return {
+            node_group.name.split('.')[0]: {
+                'interface': list(get_geometry_node_input_presets(modifier)), 
+                'nodes': get_special_node_presets(node_group), 
+            }, 
+            }
+
+
+def get_node_group_interface_presets(node_group: BGroup) -> Generator[PYDict, None, None]:
+    """Retrieve a generator object of node group input sockets and values.
+    
+    :param node_group: Node group to get data from.
+    :type node_group: NodeGroup"""
+    return ([socket.name, convert_attr(socket.default_value), socket.identifier] for socket in node_group.inputs)
+
+
+def get_node_group_input_presets(node_group: BGroup, get_unlinked: bool=False) -> PYDict:
+    """Retrieve a dict node group input sockets and values.
+    
+    :param node_group: Node group to get data from.
+    :type node_group: NodeGroup
+    :param get_unlinked: Choose whether to get linked input data.
+    :type get_unlinked: bool
+    :return: Data dict with node, index, and values.
+    :rtype: dict[str, dict[str, list[int, Any]]]"""
+    data = nested_dict()
+    for k, v in groupby(get_group_nodes_presets(node_group.nodes, get_unlinked=get_unlinked), itemgetter(0)):
+        d = grouped_by_dict()
+        for i, j in groupby(v, itemgetter(1)):
+            d[i] = [[*_] for _ in map(itemgetter(2, 3, 4, 5), j)]
+        data[k] = d
+    return data
+
+
+def get_node_group_presets(node_group: BGroup) -> PYDict:
+    """Retrieve preset data for a Geometry Node modifier.
+    
+    :param modifier: Geometry Node modifier to get data from.
+    :type modifier: Modifier
+    :return: Data dict with data for setting modifier input settings and special node settings.
+    :rtype: dict[str, Any]"""
+    return {
+        node_group.name.split('.')[0]: {
+            'interface': list(get_node_group_input_presets(node_group)), 
+            'nodes': get_special_node_presets(node_group), 
+        }, 
+        }
