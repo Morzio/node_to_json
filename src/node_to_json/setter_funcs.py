@@ -2,14 +2,10 @@ from .type_util import PYDict, BNode, BGroup
 from .node_registry import register_node_setter, bpy_types_funcs, BtypeFn
 
 
-# set_node_exclude = ['type', 'parent', 'inputs', 'outputs', 'bl_idname', 'object', 'image', 'material', 'scene', 'id_data']
-
-
 #### HELPER FUNCS ####
 
 
 def set_node_attr(node: BNode, attr: PYDict, *args: str) -> None:
-    # global set_node_exclude
     exclude_ = {a for a in ['type', 'parent', 'inputs', 'outputs', 'bl_idname', 'object', 'image', 'material', 'scene', 'id_data'] + list(args)}
     for a in attr:
         if not isinstance(attr[a], dict):

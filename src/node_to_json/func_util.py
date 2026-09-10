@@ -64,7 +64,7 @@ def convert_attr(val: PYObject | list[PYObject]) -> PYObject | list[PYObject]:
         return [list(v) for v in val]
     if isinstance(val, (bpy.types.Object, bpy.types.Material, bpy.types.Image, bpy.types.ImageTexture, bpy.types.Texture, bpy.types.Collection, bpy.types.Scene, bpy.types.Sound, bpy.types.MovieClip, bpy.types.AnimData, bpy.types.Action, bpy.types.Annotation, bpy.types.Mask)):
         return None
-    if isinstance(val, (bpy.types.Node, bpy.types.GeometryNodeTree, bpy.types.ShaderNodeTree, bpy.types.CompositorNodeTree)):
+    if isinstance(val, (bpy.types.Node, bpy.types.GeometryNodeTree, bpy.types.ShaderNodeTree, bpy.types.CompositorNodeTree, bpy.types.TextureNodeTree)):
         return val.name
     if isinstance(val, (bpy.types.NodeTreeInterfaceItem, bpy.types.NodeTreeInterfacePanel)):
         if hasattr(val, 'persistent_uid'):
@@ -519,7 +519,7 @@ def split_list_of_dicts(data: list[PYDict], item: str) -> defaultdict[str, list[
     :type item: str
     :return: A dict of list seperated by item retrieved data
     :rtype: defaultdict[str, list[Any]]"""
-    split_data = defaultdict(list)
+    split_data = grouped_by_dict()
     for element in data:
         split_data[element[item]].append(element)
     return split_data
@@ -533,9 +533,9 @@ def string_point_check(text: str) -> str | None:
     :return: Text stripped of period unless it begins with a period.
     :rtype: str | None"""
     t = text.split(".")
-    if string_startswith(text) and len(t) > 1:
+    if text.startswith(".") and len(t) > 1:
         return f".{t[1]}"
-    elif len(t) > 0:
+    elif not text.startswith(".") and len(t) > 0:
         return t[0]
     else:
         return
@@ -606,7 +606,7 @@ def benchmark(func: Callable[..., Any]) -> Any:
 
 
 def get_profile(func: Callable[..., Any]) -> Any:
-    """Get the profiling times for a function run.
+    """Get the profiling times for a function run. Used for developmnent.
     
     :param func: Function to pass decorator to.
     :type func: Callable[..., Any]

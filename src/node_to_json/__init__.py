@@ -99,6 +99,7 @@ from .node_setters import (
     set_geometry_node_presets, 
     set_node_group_input_presets, 
     set_node_group_presets, 
+    node_common_attr, 
     )
 from .file_util import (
     is_file_accessible, 
@@ -231,6 +232,7 @@ __all__ = [
     "CallBeforeFunc", 
     "benchmark", 
     "get_profile", 
+    "node_common_attr", 
     ]
 
 def __dir__():

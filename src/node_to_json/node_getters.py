@@ -1,4 +1,5 @@
 import bpy
+from idprop.types import IDPropertyArray
 from typing import Any, Generator
 from operator import itemgetter
 from itertools import groupby
@@ -237,12 +238,14 @@ def get_node_data(node: BNode) -> PYDict:
         val = getattr(node, attr, None)
         val_ = convert_attr(val)
         if type(val).__name__ not in node_type_exclude and attr not in {'parent'}:
-            if type(val).__name__ in dir(bpy.types):
+            if isinstance(val, (bpy.types.bpy_prop_array, IDPropertyArray)):
+                return [attr, convert_attr(list(val))]
+            elif type(val).__name__ in dir(bpy.types):
                 return [attr, get_node_data(val)]
             else:
                 return [attr, val_]
         else: 
-            if type(val).__name__ in {'Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree'} or attr in {'parent'}:
+            if type(val).__name__ in {'Node', 'GeometryNodeTree', 'ShaderNodeTree', 'CompositorNodeTree', 'TextureNodeTree'} or attr in {'parent'}:
                 return [attr, val_]
             elif type(val).__name__ in {'bpy_prop_collection'}:
                 return [attr, [get_node_data(v) for v in val[:]]]

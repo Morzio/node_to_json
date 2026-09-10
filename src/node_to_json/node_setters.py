@@ -25,6 +25,38 @@ tree_exclude = {
                 }
 
 
+node_common_attr = {
+        'bl_icon', 
+        'bl_description', 
+        'bl_label', 
+        'bl_width_default', 
+        'bl_width_min', 
+        'bl_width_max', 
+        'bl_height_default', 
+        'bl_height_min', 
+        'bl_height_max', 
+        'name', 
+        'use_custom_color', 
+        'color', 
+        'width', 
+        'height', 
+        'label', 
+        'mute', 
+        'select', 
+        'hide', 
+        'warning_propagation', 
+        'show_preview', 
+        'show_texture', 
+        'show_options', 
+        'location_absolute', 
+        'location', 
+        'type', 
+        'parent', 
+        'bl_idname', 
+        'id_data', 
+    }
+
+
 ########################## NODE ###########################
 
 
